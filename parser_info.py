@@ -1,8 +1,8 @@
 import asyncio
+import os
 
 import aiohttp
-
-from create_connection import SQLiteConnection
+import pandas as pd
 
 
 url = (
@@ -12,62 +12,67 @@ url = (
     'Port($select=PortName),' +
     'FlowType($select=FlowTypeDescription),' +
     'Date($select=Year,MonthName) ' +
-    '& $filter=Monthid eq 202112 ' +
+    '& $filter=Monthid eq 202112 and (FlowTypeId eq 1 or FlowTypeId eq 2) ' +
     '&$select=Value,NetMass,SuppUnit&$skip='
 )
 
+file_path = 'output.csv'
+headers = [
+    'Cn8Code',
+    'Cn8LongDescription',
+    'EU/NonEU',
+    'Continent',
+    'Country',
+    'PortName',
+    'Value (£)',
+    'NetMass (Kg)',
+    'SuppUnit',
+    'FlowType',
+    'Year',
+    'Month'
+]
+
 
 def insert_into_db(values: list[dict]):
-    with SQLiteConnection() as cursor:
-        for element in values:
-            cn8code = element.get('Commodity').get('Cn8Code')
-            cn8longdescription = (
+    data_list = []
+    for element in values:
+        Cn8Code = element.get('Commodity').get('Cn8Code')
+        if not Cn8Code or len(Cn8Code.strip('-')) != 8:
+            continue
+        data_dict = {
+            'Cn8Code': Cn8Code,
+            'Cn8LongDescription': (
                 element
                 .get('Commodity')
                 .get('Cn8LongDescription')
-            )
-            flowtype = (
+            ),
+            'Continent': element.get('Country').get('Area1a'),
+            'Country': element.get('Country').get('CountryName'),
+            'PortName': element.get('Port').get('PortName'),
+            'Value (£)': element.get('Value'),
+            'NetMass (Kg)': element.get('NetMass'),
+            'SuppUnit': element.get('SuppUnit'),
+            'FlowType': (
                 element
                 .get('FlowType')
                 .get('FlowTypeDescription')
                 .strip()
-            )
-            if flowtype.startswith('EU'):
-                eu_non_eu = 'EU'
-            else:
-                eu_non_eu = 'NON EU'
-            continent = element.get('Country').get('Area1a')
-            country = element.get('Country').get('CountryName')
-            portname = element.get('Port').get('PortName')
-            value = element.get('Value')
-            netmass = element.get('NetMass')
-            suppunit = element.get('SuppUnit')
-            year = element.get('Date').get('Year')
-            month = element.get('Date').get('MonthName')
-            cursor.execute(
-                """
-                INSERT INTO UKTrade (
-                    Cn8Code,
-                    Cn8LongDescription,
-                    "EU/NonEU",
-                    Continent,
-                    Country,
-                    PortName,
-                    "Value (£)",
-                    "NetMass (Kg)",
-                    SuppUnit,
-                    FlowType,
-                    Year,
-                    Month
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    cn8code, cn8longdescription, eu_non_eu, continent,
-                    country, portname, value, netmass, suppunit, flowtype,
-                    year, month
-                )
-            )
+            ),
+            'Year': element.get('Date').get('Year'),
+            'Month': element.get('Date').get('MonthName')
+
+        }
+        if data_dict.get('FlowType').startswith('EU'):
+            data_dict['EU/NonEU'] = 'EU'
+        else:
+            data_dict['EU/NonEU'] = 'NonEU'
+        data_list.append(data_dict)
+    df = pd.DataFrame(data_list)
+    df = df.reindex(columns=headers)
+    if not os.path.isfile(file_path):
+        df.to_csv(file_path, index=False, mode='a', header=True, sep=';')
+    else:
+        df.to_csv(file_path, index=False, mode='a', header=False, sep=';')
 
 
 async def gather_info(url: str):
@@ -90,7 +95,11 @@ async def main():
         tasks_array = []
         for _ in range(5):
             skip = str(index * 30000)
-            tasks_array.append(asyncio.create_task(gather_info(url+skip)))
+            task = (
+                asyncio.create_task(
+                    asyncio.wait_for(gather_info(url+skip), timeout=None))
+            )
+            tasks_array.append(task)
             index += 1
         results = await asyncio.gather(*tasks_array)
 
