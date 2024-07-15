@@ -1,7 +1,7 @@
 Для запуска на своем компьютере скачайте код:
 
 ```text
-git@github.com:NovikovMU/parser
+git@github.com:NovikovMU/parser.git
 ```
 Установите зависимости
 ```text
